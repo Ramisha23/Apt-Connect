@@ -1,0 +1,353 @@
+import 'dart:html' as html;
+import 'dart:io';
+import 'dart:typed_data'; // For handling image bytes
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+class AddPostPage extends StatefulWidget {
+  final Map<String, dynamic> userDataMap;
+
+  const AddPostPage(this.userDataMap, {Key? key}) : super(key: key);
+
+  @override
+  _AddPostPageState createState() => _AddPostPageState();
+}
+
+class _AddPostPageState extends State<AddPostPage> {
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
+  String _imageUrl = '';
+  bool _isUploading = false;
+  late final String _userId;
+  late final String _username;
+
+   @override
+  void initState() {
+    super.initState();
+    _userId = widget.userDataMap['userId'] ?? 'unknown'; // Retrieve userId from userDataMap
+    _username = widget.userDataMap['username'] ?? 'anonymous'; // Retrieve username from userDataMap
+  }
+
+  Future<void> _pickImage() async {
+    if (kIsWeb) {
+      // Web-specific image picking
+      html.FileUploadInputElement uploadInput = html.FileUploadInputElement();
+      uploadInput.accept = 'image/*';
+      uploadInput.click();
+      
+      uploadInput.onChange.listen((e) async {
+        final files = uploadInput.files;
+        if (files == null || files.isEmpty) {
+          print('No image selected.');
+          return;
+        }
+
+        final file = files[0];
+        final reader = html.FileReader();
+        reader.readAsArrayBuffer(file);
+
+        reader.onLoadEnd.listen((e) async {
+          String uniqueFileName = DateTime.now().millisecondsSinceEpoch.toString();
+          Reference storageReference = FirebaseStorage.instance.ref().child('images/$uniqueFileName.jpg');
+
+          try {
+            final Uint8List bytes = reader.result as Uint8List;
+            final blob = html.Blob([bytes]);
+            final uploadTask = storageReference.putBlob(blob);
+
+            uploadTask.snapshotEvents.listen((event) async {
+              switch (event.state) {
+                case TaskState.success:
+                  try {
+                    String downloadURL = await storageReference.getDownloadURL();
+                    setState(() {
+                      _imageUrl = downloadURL;
+                      _isUploading = false;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Image uploaded successfully.')),
+                    );
+                  } catch (e) {
+                    print('Error getting download URL: $e');
+                    setState(() {
+                      _isUploading = false;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to get image URL.')),
+                    );
+                  }
+                  break;
+                case TaskState.error:
+                  print('Upload failed with error.');
+                  setState(() {
+                    _isUploading = false;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to upload image.')),
+                  );
+                  break;
+                default:
+                  break;
+              }
+            }).onError((error) {
+              print('Upload failed with error: $error');
+              setState(() {
+                _isUploading = false;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Failed to upload image.')),
+              );
+            });
+          } catch (e) {
+            print('Error during upload: $e');
+            setState(() {
+              _isUploading = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to upload image.')),
+            );
+          }
+        });
+      });
+    } else {
+      // Mobile-specific image picking
+      ImagePicker imagePicker = ImagePicker();
+      XFile? imageFile = await imagePicker.pickImage(source: ImageSource.gallery);
+
+      if (imageFile != null) {
+        setState(() {
+          _isUploading = true;
+        });
+
+        String uniqueFileName = DateTime.now().millisecondsSinceEpoch.toString();
+        Reference storageReference = FirebaseStorage.instance.ref().child('images/$uniqueFileName.jpg');
+
+        try {
+          final File file = File(imageFile.path);
+          final uploadTask = storageReference.putFile(file);
+
+          uploadTask.snapshotEvents.listen((event) async {
+            switch (event.state) {
+              case TaskState.success:
+                try {
+                  String downloadURL = await storageReference.getDownloadURL();
+                  setState(() {
+                    _imageUrl = downloadURL;
+                    _isUploading = false;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Image uploaded successfully.')),
+                  );
+                } catch (e) {
+                  print('Error getting download URL: $e');
+                  setState(() {
+                    _isUploading = false;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to get image URL.')),
+                  );
+                }
+                break;
+              case TaskState.error:
+                print('Upload failed with error.');
+                setState(() {
+                  _isUploading = false;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to upload image.')),
+                );
+                break;
+              default:
+                break;
+            }
+          }).onError((error) {
+            print('Upload failed with error: $error');
+            setState(() {
+              _isUploading = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to upload image.')),
+            );
+          });
+        } catch (e) {
+          print('Error during upload: $e');
+          setState(() {
+            _isUploading = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to upload image.')),
+          );
+        }
+      } else {
+        print('No image selected.');
+      }
+    }
+  }
+
+  Future<void> _submitPost() async {
+    String title = _titleController.text.trim();
+    String description = _descriptionController.text.trim();
+
+    if (title.isNotEmpty && description.isNotEmpty && _imageUrl.isNotEmpty) {
+      try {
+        await FirebaseFirestore.instance.collection('posts').add({
+          'imageUrl': _imageUrl,
+          'title': title,
+          'description': description,
+          'timestamp': Timestamp.now(),
+          'userId': _userId,
+          'username': _username,
+          'likes': 0,
+          'comments': [],
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Post uploaded successfully.')),
+        );
+
+        _clearForm();
+      } catch (e) {
+        print('Error adding post: $e');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add post.')),
+        );
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please fill all fields and upload an image.')),
+      );
+    }
+  }
+
+  void _clearForm() {
+    _titleController.clear();
+    _descriptionController.clear();
+    setState(() {
+      _imageUrl = '';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: Icon(Icons.close, color: Colors.black),
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+        ),
+        title: Text(
+          'Create a Post',
+          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _submitPost,
+            child: Text(
+              'Post',
+              style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+        backgroundColor: Colors.white,
+        elevation: 1,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title input
+            TextField(
+              controller: _titleController,
+              decoration: InputDecoration(
+                hintText: 'Add a title...',
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                hintStyle: TextStyle(color: Colors.grey),
+              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+            ),
+            Divider(color: Colors.grey),
+            // Description input
+            TextField(
+              controller: _descriptionController,
+              decoration: InputDecoration(
+                hintText: 'Add a description...',
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 8.0),
+                hintStyle: TextStyle(color: Colors.grey),
+              ),
+              style: TextStyle(fontSize: 16, color: Colors.black),
+              maxLines: null,
+            ),
+            SizedBox(height: 20),
+            // Image preview
+            if (_imageUrl.isNotEmpty)
+              Container(
+                margin: EdgeInsets.symmetric(vertical: 8.0),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8.0),
+                  border: Border.all(color: Colors.grey),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 8.0,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8.0),
+                  child: Image.network(
+                    _imageUrl,
+                    height: 200,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+            SizedBox(height: 20),
+            // Upload Image Button
+            ElevatedButton.icon(
+              onPressed: _pickImage,
+              icon: Icon(Icons.upload_file, color: Colors.white),
+              label: Text("Upload Image"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+            ),
+            if (_isUploading) Center(child: CircularProgressIndicator()), // Show progress indicator while uploading
+            SizedBox(height: 20),
+            // Additional options
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('Waitlist', style: TextStyle(color: Colors.black)),
+              subtitle: Text('Enabling waitlist will allow users to view waitlist.', style: TextStyle(color: Colors.grey)),
+              value: true,
+              onChanged: (bool value) {},
+              activeColor: Colors.blue,
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('Comment', style: TextStyle(color: Colors.black)),
+              subtitle: Text('Enabling comment will allow users to comment.', style: TextStyle(color: Colors.grey)),
+              value: true,
+              onChanged: (bool value) {},
+              activeColor: Colors.blue,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

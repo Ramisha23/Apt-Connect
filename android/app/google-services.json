@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "336770537635",
+    "project_id": "aptconnect-15f20",
+    "storage_bucket": "aptconnect-15f20.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:336770537635:android:df03ac91d85617102bc716",
+        "android_client_info": {
+          "package_name": "com.example.apt_connect"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBrn7eQzuxKp9WL4MhDtHDU51z0dT8zjE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
